@@ -319,3 +319,25 @@ body.is-resizing-selection * {
   bottom: 18px;
   color: #ffd6d6;
 }
+
+#selection-size {
+  position: absolute;
+  z-index: 4;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(10, 10, 12, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  pointer-events: none;
+  white-space: nowrap;
+  transform: translate(-100%, -100%);
+  transition: opacity 0.2s ease;
+}
+
+#selection-size.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+}
