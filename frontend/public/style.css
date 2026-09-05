@@ -44,6 +44,14 @@ body.is-move-tool #selection-box.is-annotating canvas {
   pointer-events: none;
 }
 
+body.is-text-tool #selection-box.is-annotating canvas {
+  pointer-events: none;
+}
+
+#selection-box.is-annotating {
+  overflow: visible;
+}
+
 #toolbar input[type="color"].is-hidden {
   display: none;
 }
@@ -102,6 +110,39 @@ body.is-move-tool #selection-box.is-annotating canvas {
   inset: 0;
   width: 100%;
   height: 100%;
+}
+
+#text-editor-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.text-editor {
+  position: absolute;
+  min-width: 48px;
+  padding: 0 2px;
+  margin: 0;
+  border: 1px dashed rgba(255, 255, 255, 0.55);
+  border-radius: 2px;
+  background: rgba(8, 8, 10, 0.42);
+  color: #fff;
+  font: 18px "IBM Plex Sans", "Segoe UI", ui-sans-serif, sans-serif;
+  line-height: 1.2;
+  outline: none;
+  pointer-events: auto;
+  user-select: text;
+  caret-color: currentColor;
+}
+
+.text-editor::placeholder {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.text-editor:focus {
+  border-color: rgba(255, 255, 255, 0.9);
+  background: rgba(8, 8, 10, 0.58);
 }
 
 #toolbar {

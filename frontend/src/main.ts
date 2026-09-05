@@ -2,6 +2,7 @@ import {
   CancelCapture,
   CopyToClipboard,
   GetCaptureState,
+  OverlayLog,
   SaveWithDialog,
 } from "../bindings/screenshot-go/captureservice";
 import type {
@@ -27,6 +28,7 @@ const dimOverlay = mustQuery<HTMLDivElement>("#dim-overlay");
 const selectionBox = mustQuery<HTMLDivElement>("#selection-box");
 const annotationLayer = mustQuery<HTMLCanvasElement>("#annotation-layer");
 const draftLayer = mustQuery<HTMLCanvasElement>("#draft-layer");
+const textEditorLayer = mustQuery<HTMLDivElement>("#text-editor-layer");
 const toolbar = mustQuery<HTMLDivElement>("#toolbar");
 const hint = mustQuery<HTMLDivElement>("#hint");
 const status = mustQuery<HTMLDivElement>("#status");
@@ -61,8 +63,17 @@ let selection: SelectionBounds | null = null;
 let annotations: Annotation[] = [];
 let dragState: DragState = null;
 let busy = false;
+let activeTextEditor: { element: HTMLInputElement; x: number; y: number } | null = null;
 
+const TEXT_FONT_SIZE = 18;
+const TEXT_EDIT_BLUR_GUARD_MS = 300;
 const imageDataUrlPrefix = "data:image/png;base64,";
+
+function overlayLog(message: string, data?: Record<string, unknown>) {
+  const payload = data ? `${message} ${JSON.stringify(data)}` : message;
+  console.log("[overlay]", payload);
+  void OverlayLog(payload).catch(() => {});
+}
 
 void bootstrap();
 
@@ -95,11 +106,16 @@ function bindEvents() {
   toolbar.addEventListener("pointerdown", (event) => event.stopPropagation());
 
   toolbar.addEventListener("click", async (event) => {
-    const target = event.target as HTMLElement;
+    const target = (event.target as HTMLElement).closest<HTMLElement>("[data-tool],[data-action]");
+    if (!target) {
+      return;
+    }
     const tool = target.dataset.tool as Tool | undefined;
     const action = target.dataset.action;
 
     if (tool) {
+      overlayLog("toolbar tool selected", { tool, previousTool: activeTool });
+      finishTextEdit();
       activeTool = tool;
       updateToolbarState();
       return;
@@ -121,6 +137,9 @@ function bindEvents() {
   });
 
   colorPicker.addEventListener("input", () => {
+    if (activeTextEditor) {
+      activeTextEditor.element.style.color = colorPicker.value;
+    }
     redrawAll();
   });
 
@@ -128,6 +147,20 @@ function bindEvents() {
 }
 
 function onKeyDown(event: KeyboardEvent) {
+  if (activeTextEditor) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      dismissTextEdit();
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      finishTextEdit();
+      return;
+    }
+  }
+
   if (event.key === "Escape") {
     event.preventDefault();
     void cancelCapture();
@@ -158,18 +191,39 @@ function onKeyDown(event: KeyboardEvent) {
 
 function onPointerDown(event: PointerEvent) {
   if (busy) {
+    overlayLog("pointerdown ignored (busy)");
     return;
   }
 
+  const target = event.target as Node;
+  if (activeTextEditor?.element.contains(target)) {
+    overlayLog("pointerdown on active text editor");
+    return;
+  }
+
+  if (activeTextEditor) {
+    overlayLog("pointerdown outside text editor, finishing edit");
+    finishTextEdit();
+  }
+
   const point = viewportPoint(event.clientX, event.clientY);
+  overlayLog("pointerdown", {
+    mode,
+    activeTool,
+    point,
+    selection,
+    target: (event.target as HTMLElement).id || (event.target as HTMLElement).className,
+  });
 
   if (mode === "annotate") {
     if (!selection || !pointInSelection(point.x, point.y, selection)) {
+      overlayLog("pointerdown outside selection, resetting");
       resetToSelectionMode(point);
       return;
     }
 
     if (activeTool === "move") {
+      finishTextEdit();
       dragState = {
         kind: "move",
         pointerOriginX: point.x,
@@ -178,6 +232,16 @@ function onPointerDown(event: PointerEvent) {
       };
       setMovingSelection(true);
       app.setPointerCapture(event.pointerId);
+      return;
+    }
+
+    if (activeTool === "text") {
+      event.preventDefault();
+      const local = {
+        x: point.x - selection.x,
+        y: point.y - selection.y,
+      };
+      startTextEdit(local.x, local.y);
       return;
     }
   }
@@ -201,25 +265,6 @@ function onPointerDown(event: PointerEvent) {
     x: point.x - selection.x,
     y: point.y - selection.y,
   };
-
-  if (activeTool === "text") {
-    const text = window.prompt("Text annotation", "");
-    if (!text) {
-      return;
-    }
-    annotations.push({
-      type: "text",
-      color: colorPicker.value,
-      x1: local.x,
-      y1: local.y,
-      x2: local.x,
-      y2: local.y,
-      text,
-      fontSize: 18,
-    });
-    redrawAll();
-    return;
-  }
 
   dragState = {
     kind: "annotation",
@@ -355,11 +400,13 @@ function resetToSelectionMode(startPoint?: { x: number; y: number }) {
   selection = null;
   annotations = [];
   dragState = null;
+  dismissTextEdit();
   toolbar.hidden = true;
   hint.textContent = "Drag to select an area. Press Escape to cancel.";
   setCrosshairCursor(true);
   setMovingSelection(false);
   document.body.classList.remove("is-move-tool");
+  document.body.classList.remove("is-text-tool");
   clearCanvas(annotationLayer);
   clearCanvas(draftLayer);
   updateSelectionVisuals({ x: 0, y: 0, width: 0, height: 0 });
@@ -549,6 +596,7 @@ function drawArrow(
 async function performCopy() {
   busy = true;
   try {
+    finishTextEdit();
     await CopyToClipboard(buildExportRequest());
   } catch (error) {
     showError(error);
@@ -560,6 +608,7 @@ async function performCopy() {
 async function performSave() {
   busy = true;
   try {
+    finishTextEdit();
     const path = await SaveWithDialog(buildExportRequest());
     if (!path) {
       return;
@@ -599,6 +648,7 @@ function updateToolbarState() {
   }
   colorPicker.classList.toggle("is-hidden", activeTool === "move");
   document.body.classList.toggle("is-move-tool", mode === "annotate" && activeTool === "move");
+  document.body.classList.toggle("is-text-tool", mode === "annotate" && activeTool === "text");
 }
 
 function resizeCanvas(canvas: HTMLCanvasElement, width: number, height: number) {
@@ -666,6 +716,98 @@ function setCrosshairCursor(enabled: boolean) {
 
 function setMovingSelection(enabled: boolean) {
   document.body.classList.toggle("is-moving-selection", enabled);
+}
+
+function startTextEdit(x: number, y: number) {
+  if (!selection) {
+    overlayLog("startTextEdit aborted (no selection)");
+    return;
+  }
+
+  finishTextEdit();
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "text-editor";
+  input.spellcheck = false;
+  input.style.color = colorPicker.value;
+  input.style.left = `${x}px`;
+  input.style.top = `${y}px`;
+  input.style.width = `${Math.min(Math.max(selection.width - x - 4, 48), 280)}px`;
+  input.style.fontSize = `${TEXT_FONT_SIZE}px`;
+  input.addEventListener("pointerdown", (event) => event.stopPropagation());
+
+  const blurGuardUntil = Date.now() + TEXT_EDIT_BLUR_GUARD_MS;
+  input.addEventListener("blur", () => {
+    if (Date.now() < blurGuardUntil) {
+      overlayLog("text blur ignored (focus guard)", {
+        remainingMs: blurGuardUntil - Date.now(),
+      });
+      requestAnimationFrame(() => {
+        if (activeTextEditor?.element === input) {
+          input.focus({ preventScroll: true });
+        }
+      });
+      return;
+    }
+    overlayLog("text blur commit");
+    finishTextEdit();
+  });
+
+  textEditorLayer.append(input);
+  activeTextEditor = { element: input, x, y };
+  overlayLog("text editor created", {
+    x,
+    y,
+    width: input.style.width,
+    layerChildren: textEditorLayer.childElementCount,
+  });
+
+  requestAnimationFrame(() => {
+    input.focus({ preventScroll: true });
+    overlayLog("text editor focus attempted", {
+      activeElement: document.activeElement === input ? "input" : document.activeElement?.nodeName,
+    });
+  });
+}
+
+function finishTextEdit() {
+  if (!activeTextEditor) {
+    return;
+  }
+
+  const { element, x, y } = activeTextEditor;
+  const text = element.value.trim();
+  overlayLog("finishTextEdit", { x, y, textLength: text.length, textPreview: text.slice(0, 40) });
+  element.remove();
+  activeTextEditor = null;
+
+  if (!text) {
+    redrawAll();
+    return;
+  }
+
+  annotations.push({
+    type: "text",
+    color: colorPicker.value,
+    x1: x,
+    y1: y,
+    x2: x,
+    y2: y,
+    text,
+    fontSize: TEXT_FONT_SIZE,
+  });
+  redrawAll();
+}
+
+function dismissTextEdit() {
+  if (!activeTextEditor) {
+    return;
+  }
+  overlayLog("dismissTextEdit");
+  activeTextEditor.element.remove();
+  activeTextEditor = null;
+  redrawAll();
 }
 
 function showError(error: unknown) {

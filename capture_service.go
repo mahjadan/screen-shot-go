@@ -466,6 +466,13 @@ func (s *CaptureService) GetCaptureState() (*CaptureSession, error) {
 	return &copySession, nil
 }
 
+func (s *CaptureService) OverlayLog(message string) {
+	if s.app == nil || strings.TrimSpace(message) == "" {
+		return
+	}
+	s.app.Logger.Info("[overlay] " + message)
+}
+
 func (s *CaptureService) CopyToClipboard(req ExportRequest) error {
 	pngBytes, err := s.composePNG(req)
 	if err != nil {

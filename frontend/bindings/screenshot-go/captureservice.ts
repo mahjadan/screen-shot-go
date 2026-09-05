@@ -12,3 +12,6 @@ export const SaveWithDialog = (request: ExportRequest): Promise<string> =>
 
 export const CancelCapture = (): Promise<void> =>
   $Call.ByName("main.CaptureService.CancelCapture");
+
+export const OverlayLog = (message: string): Promise<void> =>
+  $Call.ByName("main.CaptureService.OverlayLog", message);
