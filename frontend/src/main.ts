@@ -10,6 +10,7 @@ import type {
   AnnotationTool,
   CaptureState,
   ExportRequest,
+  ResizeHandle,
   SelectionBounds,
   Tool,
 } from "./types";
@@ -29,6 +30,7 @@ const selectionBox = mustQuery<HTMLDivElement>("#selection-box");
 const annotationLayer = mustQuery<HTMLCanvasElement>("#annotation-layer");
 const draftLayer = mustQuery<HTMLCanvasElement>("#draft-layer");
 const textEditorLayer = mustQuery<HTMLDivElement>("#text-editor-layer");
+const resizeHandles = mustQuery<HTMLDivElement>("#resize-handles");
 const toolbar = mustQuery<HTMLDivElement>("#toolbar");
 const hint = mustQuery<HTMLDivElement>("#hint");
 const status = mustQuery<HTMLDivElement>("#status");
@@ -44,6 +46,11 @@ type DragState =
       kind: "move";
       pointerOriginX: number;
       pointerOriginY: number;
+      selectionOrigin: SelectionBounds;
+    }
+  | {
+      kind: "resize";
+      handle: ResizeHandle;
       selectionOrigin: SelectionBounds;
     }
   | {
@@ -67,6 +74,7 @@ let activeTextEditor: { element: HTMLInputElement; x: number; y: number } | null
 
 const TEXT_FONT_SIZE = 18;
 const TEXT_EDIT_BLUR_GUARD_MS = 300;
+const MIN_SELECTION_SIZE = 5;
 const imageDataUrlPrefix = "data:image/png;base64,";
 
 function overlayLog(message: string, data?: Record<string, unknown>) {
@@ -104,6 +112,7 @@ function bindEvents() {
   window.addEventListener("pointerup", onPointerUp);
   window.addEventListener("resize", redrawAll);
   toolbar.addEventListener("pointerdown", (event) => event.stopPropagation());
+  resizeHandles.addEventListener("pointerdown", onResizeHandleDown);
 
   toolbar.addEventListener("click", async (event) => {
     const target = (event.target as HTMLElement).closest<HTMLElement>("[data-tool],[data-action]");
@@ -187,6 +196,30 @@ function onKeyDown(event: KeyboardEvent) {
     event.preventDefault();
     void performSave();
   }
+}
+
+function onResizeHandleDown(event: PointerEvent) {
+  if (busy || mode !== "annotate" || !selection) {
+    return;
+  }
+
+  const handleTarget = (event.target as HTMLElement).closest<HTMLElement>("[data-handle]");
+  const handle = handleTarget?.dataset.handle as ResizeHandle | undefined;
+  if (!handle || !handleTarget) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  finishTextEdit();
+
+  dragState = {
+    kind: "resize",
+    handle,
+    selectionOrigin: { ...selection },
+  };
+  setResizingSelection(true, window.getComputedStyle(handleTarget).cursor);
+  app.setPointerCapture(event.pointerId);
 }
 
 function onPointerDown(event: PointerEvent) {
@@ -315,6 +348,15 @@ function onPointerMove(event: PointerEvent) {
     return;
   }
 
+  if (dragState.kind === "resize") {
+    if (!selection) {
+      return;
+    }
+    selection = applyResize(dragState.handle, dragState.selectionOrigin, point, getViewportSize());
+    updateSelectionVisuals(selection);
+    return;
+  }
+
   if (!selection) {
     return;
   }
@@ -356,6 +398,16 @@ function onPointerUp(event: PointerEvent) {
     return;
   }
 
+  if (dragState.kind === "resize") {
+    dragState = null;
+    setResizingSelection(false);
+    if (app.hasPointerCapture(event.pointerId)) {
+      app.releasePointerCapture(event.pointerId);
+    }
+    redrawAll();
+    return;
+  }
+
   if (!selection) {
     dragState = null;
     clearDraft();
@@ -387,7 +439,7 @@ function enterAnnotationMode() {
   mode = "annotate";
   activeTool = "move";
   hint.textContent =
-    "Drag inside the selection to move it, or pick a tool to annotate. Copy/Save with Ctrl+C / Ctrl+S. Click outside to reselect.";
+    "Drag to move, use handles to resize, or pick a tool to annotate. Copy/Save with Ctrl+C / Ctrl+S. Click outside to reselect.";
   toolbar.hidden = false;
   setCrosshairCursor(false);
   updateToolbarState();
@@ -405,6 +457,7 @@ function resetToSelectionMode(startPoint?: { x: number; y: number }) {
   hint.textContent = "Drag to select an area. Press Escape to cancel.";
   setCrosshairCursor(true);
   setMovingSelection(false);
+  setResizingSelection(false);
   document.body.classList.remove("is-move-tool");
   document.body.classList.remove("is-text-tool");
   clearCanvas(annotationLayer);
@@ -436,6 +489,7 @@ function updateSelectionVisuals(rect: SelectionBounds) {
   selectionBox.style.height = `${height}px`;
   selectionBox.classList.toggle("is-annotating", mode === "annotate");
   selectionBox.classList.toggle("is-empty", !hasSelection);
+  resizeHandles.classList.toggle("is-hidden", mode !== "annotate" || !hasSelection);
   toolbar.hidden = mode !== "annotate";
 
   updateDimOverlay(viewport, x, y, width, height, hasSelection);
@@ -716,6 +770,58 @@ function setCrosshairCursor(enabled: boolean) {
 
 function setMovingSelection(enabled: boolean) {
   document.body.classList.toggle("is-moving-selection", enabled);
+}
+
+function setResizingSelection(enabled: boolean, cursor = "") {
+  document.body.classList.toggle("is-resizing-selection", enabled);
+  document.body.style.cursor = enabled ? cursor : "";
+}
+
+function applyResize(
+  handle: ResizeHandle,
+  origin: SelectionBounds,
+  point: { x: number; y: number },
+  viewport: { width: number; height: number },
+): SelectionBounds {
+  let x1 = origin.x;
+  let y1 = origin.y;
+  let x2 = origin.x + origin.width;
+  let y2 = origin.y + origin.height;
+
+  if (handle.includes("w")) {
+    x1 = point.x;
+  }
+  if (handle.includes("e")) {
+    x2 = point.x;
+  }
+  if (handle.includes("n")) {
+    y1 = point.y;
+  }
+  if (handle.includes("s")) {
+    y2 = point.y;
+  }
+
+  if (x2 - x1 < MIN_SELECTION_SIZE) {
+    if (handle.includes("w")) {
+      x1 = x2 - MIN_SELECTION_SIZE;
+    } else {
+      x2 = x1 + MIN_SELECTION_SIZE;
+    }
+  }
+  if (y2 - y1 < MIN_SELECTION_SIZE) {
+    if (handle.includes("n")) {
+      y1 = y2 - MIN_SELECTION_SIZE;
+    } else {
+      y2 = y1 + MIN_SELECTION_SIZE;
+    }
+  }
+
+  x1 = clamp(x1, 0, viewport.width - MIN_SELECTION_SIZE);
+  y1 = clamp(y1, 0, viewport.height - MIN_SELECTION_SIZE);
+  x2 = clamp(x2, x1 + MIN_SELECTION_SIZE, viewport.width);
+  y2 = clamp(y2, y1 + MIN_SELECTION_SIZE, viewport.height);
+
+  return normalizeRect(x1, y1, x2, y2);
 }
 
 function startTextEdit(x: number, y: number) {

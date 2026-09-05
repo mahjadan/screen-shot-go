@@ -1,5 +1,6 @@
 export type AnnotationTool = "rectangle" | "ellipse" | "arrow" | "text";
 export type Tool = AnnotationTool | "move";
+export type ResizeHandle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
 export interface SelectionBounds {
   x: number;
