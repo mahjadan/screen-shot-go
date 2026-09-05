@@ -33,6 +33,7 @@ const textEditorLayer = mustQuery<HTMLDivElement>("#text-editor-layer");
 const resizeHandles = mustQuery<HTMLDivElement>("#resize-handles");
 const toolbar = mustQuery<HTMLDivElement>("#toolbar");
 const hint = mustQuery<HTMLDivElement>("#hint");
+const selectionSizeLabel = mustQuery<HTMLDivElement>("#selection-size");
 const status = mustQuery<HTMLDivElement>("#status");
 const colorPicker = mustQuery<HTMLInputElement>("#color-picker");
 type DragState =
@@ -75,7 +76,11 @@ let activeTextEditor: { element: HTMLInputElement; x: number; y: number } | null
 const TEXT_FONT_SIZE = 18;
 const TEXT_EDIT_BLUR_GUARD_MS = 300;
 const MIN_SELECTION_SIZE = 5;
+const SELECTION_SIZE_HIDE_MS = 4000;
 const imageDataUrlPrefix = "data:image/png;base64,";
+
+let selectionSizeHideTimer: ReturnType<typeof setTimeout> | null = null;
+let lastDisplayedSelectionSize = "";
 
 function overlayLog(message: string, data?: Record<string, unknown>) {
   const payload = data ? `${message} ${JSON.stringify(data)}` : message;
@@ -453,6 +458,7 @@ function resetToSelectionMode(startPoint?: { x: number; y: number }) {
   annotations = [];
   dragState = null;
   dismissTextEdit();
+  hideSelectionSizeLabel();
   toolbar.hidden = true;
   hint.textContent = "Drag to select an area. Press Escape to cancel.";
   setCrosshairCursor(true);
@@ -496,6 +502,9 @@ function updateSelectionVisuals(rect: SelectionBounds) {
 
   if (hasSelection) {
     positionToolbar({ x, y, width, height }, viewport);
+    updateSelectionSizeLabel({ x, y, width, height }, viewport);
+  } else {
+    hideSelectionSizeLabel();
   }
 }
 
@@ -537,6 +546,61 @@ function positionToolbar(rect: SelectionBounds, viewport: { width: number; heigh
 
   toolbar.style.left = `${left}px`;
   toolbar.style.top = `${top}px`;
+}
+
+function selectionExportPixels(
+  viewport: { width: number; height: number },
+  width: number,
+  height: number,
+) {
+  const screen = captureState.screen;
+  const scaleX = screen.pixelWidth / Math.max(viewport.width, 1);
+  const scaleY = screen.pixelHeight / Math.max(viewport.height, 1);
+  return {
+    width: Math.max(Math.round(width * scaleX), 0),
+    height: Math.max(Math.round(height * scaleY), 0),
+  };
+}
+
+function updateSelectionSizeLabel(rect: SelectionBounds, viewport: { width: number; height: number }) {
+  if (rect.width < MIN_SELECTION_SIZE || rect.height < MIN_SELECTION_SIZE) {
+    hideSelectionSizeLabel();
+    return;
+  }
+
+  const pixels = selectionExportPixels(viewport, rect.width, rect.height);
+  const label = `${pixels.width}x${pixels.height}`;
+  const inset = 8;
+
+  selectionSizeLabel.textContent = label;
+  selectionSizeLabel.style.left = `${rect.x + rect.width - inset}px`;
+  selectionSizeLabel.style.top = `${rect.y + rect.height - inset}px`;
+  selectionSizeLabel.classList.remove("is-hidden");
+
+  if (label !== lastDisplayedSelectionSize) {
+    lastDisplayedSelectionSize = label;
+    scheduleSelectionSizeHide();
+  }
+}
+
+function scheduleSelectionSizeHide() {
+  if (selectionSizeHideTimer) {
+    clearTimeout(selectionSizeHideTimer);
+  }
+  selectionSizeHideTimer = setTimeout(() => {
+    selectionSizeHideTimer = null;
+    selectionSizeLabel.classList.add("is-hidden");
+    lastDisplayedSelectionSize = "";
+  }, SELECTION_SIZE_HIDE_MS);
+}
+
+function hideSelectionSizeLabel() {
+  if (selectionSizeHideTimer) {
+    clearTimeout(selectionSizeHideTimer);
+    selectionSizeHideTimer = null;
+  }
+  lastDisplayedSelectionSize = "";
+  selectionSizeLabel.classList.add("is-hidden");
 }
 
 function redrawAll() {
