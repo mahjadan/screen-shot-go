@@ -507,13 +507,11 @@ function updateDimOverlay(
   height: number,
   hasSelection: boolean,
 ) {
+  dimOverlay.classList.remove("is-hidden");
   if (!hasSelection) {
-    dimOverlay.classList.add("is-hidden");
     dimOverlay.style.clipPath = "";
     return;
   }
-
-  dimOverlay.classList.remove("is-hidden");
   const w = viewport.width;
   const h = viewport.height;
   dimOverlay.style.clipPath = `polygon(

@@ -409,16 +409,27 @@ func (s *CaptureService) ensureOverlayWindow(primary *application.Screen) error 
 		Name:                       "capture-overlay",
 		Title:                      "Screenshot",
 		URL:                        "/",
-		Screen:                     primary,
 		Width:                      primary.Size.Width,
 		Height:                     primary.Size.Height,
+		X:                          primary.X,
+		Y:                          primary.Y,
+		InitialPosition:            application.WindowXY,
 		Hidden:                     true,
 		Frameless:                  true,
 		AlwaysOnTop:                true,
 		DisableResize:              true,
 		DefaultContextMenuDisabled: true,
-		StartState:                 application.WindowStateFullscreen,
+		StartState:                 application.WindowStateNormal,
 		BackgroundColour:           application.NewRGB(0, 0, 0),
+		Mac: application.MacWindow{
+			DisableShadow: true,
+			CornerType:    application.MacWindowCornerTypeSquare,
+			WindowLevel:   application.MacWindowLevelScreenSaver,
+			CollectionBehavior: application.MacWindowCollectionBehaviorCanJoinAllSpaces |
+				application.MacWindowCollectionBehaviorTransient |
+				application.MacWindowCollectionBehaviorIgnoresCycle |
+				application.MacWindowCollectionBehaviorFullScreenAuxiliary,
+		},
 		KeyBindings: map[string]func(window application.Window){
 			"Escape": func(window application.Window) {
 				_ = s.CancelCapture()
@@ -446,12 +457,20 @@ func (s *CaptureService) showOverlay(primary *application.Screen, fullscreen boo
 		return errors.New("capture overlay is unavailable")
 	}
 
-	overlay.SetSize(primary.Size.Width, primary.Size.Height)
+	s.fitOverlayToScreen(overlay, primary)
 	overlay.ForceReload()
 	overlay.Show()
 	overlay.Focus()
 	s.app.Logger.Info("[capture] overlay opened", "fullscreen", fullscreen)
 	return nil
+}
+
+func (s *CaptureService) fitOverlayToScreen(overlay *application.WebviewWindow, primary *application.Screen) {
+	if overlay.IsFullscreen() {
+		overlay.UnFullscreen()
+	}
+	overlay.SetSize(primary.Size.Width, primary.Size.Height)
+	overlay.SetPosition(primary.X, primary.Y)
 }
 
 func (s *CaptureService) GetCaptureState() (*CaptureSession, error) {
@@ -893,8 +912,14 @@ func (s *CaptureService) closeAndReset() error {
 	s.mu.Unlock()
 
 	if overlay != nil {
-		overlay.Hide()
+		application.InvokeSync(func() {
+			if overlay.IsFullscreen() {
+				overlay.UnFullscreen()
+			}
+			overlay.Hide()
+		})
 	}
+	s.app.Logger.Info("[capture] overlay closed")
 	return nil
 }
 
