@@ -1,4 +1,5 @@
-export type Tool = "rectangle" | "ellipse" | "arrow" | "text";
+export type AnnotationTool = "rectangle" | "ellipse" | "arrow" | "text";
+export type Tool = AnnotationTool | "move";
 
 export interface SelectionBounds {
   x: number;
@@ -24,7 +25,7 @@ export interface CaptureState {
 }
 
 export interface Annotation {
-  type: Tool;
+  type: AnnotationTool;
   color: string;
   x1: number;
   y1: number;

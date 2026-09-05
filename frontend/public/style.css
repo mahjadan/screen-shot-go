@@ -31,6 +31,23 @@ body.is-crosshair * {
   cursor: crosshair !important;
 }
 
+body.is-move-tool #selection-box.is-annotating {
+  cursor: grab;
+}
+
+body.is-move-tool.is-moving-selection #selection-box.is-annotating,
+body.is-move-tool.is-moving-selection #selection-box.is-annotating * {
+  cursor: grabbing !important;
+}
+
+body.is-move-tool #selection-box.is-annotating canvas {
+  pointer-events: none;
+}
+
+#toolbar input[type="color"].is-hidden {
+  display: none;
+}
+
 #app {
   position: relative;
 }

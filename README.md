@@ -61,10 +61,10 @@ wails3 build
 
 ## Linux Wayland
 
-Linux Wayland capture now uses compositor-specific backends:
+Linux Wayland capture uses compositor-specific backends:
 
 - wlroots compositors such as Sway and Hyprland use `grim` via `grim -o <primary-output> -`
-- GNOME Wayland uses the `org.gnome.Shell.Screenshot` D-Bus API through `busctl`
+- GNOME, KDE, and other non-wlroots compositors use the XDG Desktop Portal screenshot API
 
 Install `grim` with one of:
 
@@ -75,9 +75,19 @@ sudo dnf install grim
 sudo zypper install grim
 ```
 
-On GNOME, `busctl` must also be available on `PATH` so the app can call GNOME Shell's screenshot service.
+On GNOME Wayland, the first capture may show a permission prompt from the desktop portal. Approve it so the app can take screenshots in the background. Modern GNOME no longer allows direct access to `org.gnome.Shell.Screenshot` for third-party apps.
 
-If your compositor does not expose the wlroots screencopy protocol and does not provide a compatible fallback, the app returns a compositor-specific error instead of silently failing.
+### Ubuntu 24.04 WebKit / bubblewrap crash
+
+If the app crashes when opening the selection overlay with errors like `bwrap: setting up uid map: Permission denied` or `Failed to fully launch dbus-proxy`, Ubuntu's AppArmor rules are blocking WebKit's sandbox helper. The app tries to disable WebKit sandboxing automatically, but if it still crashes install the bubblewrap AppArmor profile:
+
+```bash
+sudo apt install apparmor-profiles apparmor-utils
+sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+```
+
+If your compositor does not expose the wlroots screencopy protocol and the portal fallback also fails, the app returns a compositor-specific error instead of silently failing.
 
 ## Autostart
 

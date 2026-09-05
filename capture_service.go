@@ -73,8 +73,10 @@ type SelectionBounds struct {
 }
 
 type ExportRequest struct {
-	Selection   SelectionBounds `json:"selection"`
-	Annotations []Annotation    `json:"annotations"`
+	Selection      SelectionBounds `json:"selection"`
+	Annotations    []Annotation    `json:"annotations"`
+	ViewportWidth  float64         `json:"viewportWidth"`
+	ViewportHeight float64         `json:"viewportHeight"`
 }
 
 type Annotation struct {
@@ -609,8 +611,23 @@ func (s *CaptureService) composePNG(req ExportRequest) ([]byte, error) {
 		return nil, errors.New("selection is too small")
 	}
 
-	scaleX := float64(session.Screen.PixelWidth) / float64(max(session.Screen.Width, 1))
-	scaleY := float64(session.Screen.PixelHeight) / float64(max(session.Screen.Height, 1))
+	logicalWidth := req.ViewportWidth
+	logicalHeight := req.ViewportHeight
+	if logicalWidth <= 0 {
+		logicalWidth = float64(session.Screen.Width)
+	}
+	if logicalHeight <= 0 {
+		logicalHeight = float64(session.Screen.Height)
+	}
+	if logicalWidth <= 0 {
+		logicalWidth = float64(session.Screen.PixelWidth)
+	}
+	if logicalHeight <= 0 {
+		logicalHeight = float64(session.Screen.PixelHeight)
+	}
+
+	scaleX := float64(session.Screen.PixelWidth) / logicalWidth
+	scaleY := float64(session.Screen.PixelHeight) / logicalHeight
 
 	srcRect := clampRect(image.Rect(
 		int(math.Round(req.Selection.X*scaleX)),
@@ -620,6 +637,15 @@ func (s *CaptureService) composePNG(req ExportRequest) ([]byte, error) {
 	), src.Bounds())
 	if srcRect.Dx() <= 0 || srcRect.Dy() <= 0 {
 		return nil, errors.New("selection falls outside the captured image")
+	}
+
+	if s.app != nil {
+		s.app.Logger.Info("[capture] exporting cropped selection",
+			"selection", req.Selection,
+			"viewport", fmt.Sprintf("%.0fx%.0f", logicalWidth, logicalHeight),
+			"image", fmt.Sprintf("%dx%d", session.Screen.PixelWidth, session.Screen.PixelHeight),
+			"crop", fmt.Sprintf("%dx%d@%d,%d", srcRect.Dx(), srcRect.Dy(), srcRect.Min.X, srcRect.Min.Y),
+		)
 	}
 
 	dst := image.NewRGBA(image.Rect(0, 0, srcRect.Dx(), srcRect.Dy()))

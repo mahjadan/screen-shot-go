@@ -4,7 +4,14 @@ import {
   GetCaptureState,
   SaveWithDialog,
 } from "../bindings/screenshot-go/captureservice";
-import type { Annotation, CaptureState, ExportRequest, SelectionBounds, Tool } from "./types";
+import type {
+  Annotation,
+  AnnotationTool,
+  CaptureState,
+  ExportRequest,
+  SelectionBounds,
+  Tool,
+} from "./types";
 
 function mustQuery<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -32,8 +39,14 @@ type DragState =
       current: SelectionBounds;
     }
   | {
+      kind: "move";
+      pointerOriginX: number;
+      pointerOriginY: number;
+      selectionOrigin: SelectionBounds;
+    }
+  | {
       kind: "annotation";
-      tool: Tool;
+      tool: AnnotationTool;
       originX: number;
       originY: number;
       currentX: number;
@@ -43,7 +56,7 @@ type DragState =
 
 let captureState: CaptureState;
 let mode: "selection" | "annotate" = "selection";
-let activeTool: Tool = "rectangle";
+let activeTool: Tool = "move";
 let selection: SelectionBounds | null = null;
 let annotations: Annotation[] = [];
 let dragState: DragState = null;
@@ -155,6 +168,18 @@ function onPointerDown(event: PointerEvent) {
       resetToSelectionMode(point);
       return;
     }
+
+    if (activeTool === "move") {
+      dragState = {
+        kind: "move",
+        pointerOriginX: point.x,
+        pointerOriginY: point.y,
+        selectionOrigin: { ...selection },
+      };
+      setMovingSelection(true);
+      app.setPointerCapture(event.pointerId);
+      return;
+    }
   }
 
   if (mode === "selection") {
@@ -198,7 +223,7 @@ function onPointerDown(event: PointerEvent) {
 
   dragState = {
     kind: "annotation",
-    tool: activeTool,
+    tool: activeTool as AnnotationTool,
     originX: local.x,
     originY: local.y,
     currentX: local.x,
@@ -217,6 +242,31 @@ function onPointerMove(event: PointerEvent) {
   if (dragState.kind === "selection") {
     dragState.current = normalizeRect(dragState.originX, dragState.originY, point.x, point.y);
     updateSelectionVisuals(dragState.current);
+    return;
+  }
+
+  if (dragState.kind === "move") {
+    if (!selection) {
+      return;
+    }
+    const viewport = getViewportSize();
+    const dx = point.x - dragState.pointerOriginX;
+    const dy = point.y - dragState.pointerOriginY;
+    selection = {
+      width: dragState.selectionOrigin.width,
+      height: dragState.selectionOrigin.height,
+      x: clamp(
+        dragState.selectionOrigin.x + dx,
+        0,
+        viewport.width - dragState.selectionOrigin.width,
+      ),
+      y: clamp(
+        dragState.selectionOrigin.y + dy,
+        0,
+        viewport.height - dragState.selectionOrigin.height,
+      ),
+    };
+    updateSelectionVisuals(selection);
     return;
   }
 
@@ -251,6 +301,16 @@ function onPointerUp(event: PointerEvent) {
     return;
   }
 
+  if (dragState.kind === "move") {
+    dragState = null;
+    setMovingSelection(false);
+    if (app.hasPointerCapture(event.pointerId)) {
+      app.releasePointerCapture(event.pointerId);
+    }
+    redrawAll();
+    return;
+  }
+
   if (!selection) {
     dragState = null;
     clearDraft();
@@ -280,10 +340,12 @@ function onPointerUp(event: PointerEvent) {
 
 function enterAnnotationMode() {
   mode = "annotate";
+  activeTool = "move";
   hint.textContent =
-    "Annotate, then Copy or Save (Ctrl+C / Ctrl+S). Click outside to reselect. Press Escape to cancel.";
+    "Drag inside the selection to move it, or pick a tool to annotate. Copy/Save with Ctrl+C / Ctrl+S. Click outside to reselect.";
   toolbar.hidden = false;
   setCrosshairCursor(false);
+  updateToolbarState();
   updateSelectionVisuals(selection ?? captureState.selection);
   redrawAll();
 }
@@ -296,6 +358,8 @@ function resetToSelectionMode(startPoint?: { x: number; y: number }) {
   toolbar.hidden = true;
   hint.textContent = "Drag to select an area. Press Escape to cancel.";
   setCrosshairCursor(true);
+  setMovingSelection(false);
+  document.body.classList.remove("is-move-tool");
   clearCanvas(annotationLayer);
   clearCanvas(draftLayer);
   updateSelectionVisuals({ x: 0, y: 0, width: 0, height: 0 });
@@ -533,6 +597,8 @@ function updateToolbarState() {
   for (const button of toolbar.querySelectorAll<HTMLButtonElement>("[data-tool]")) {
     button.classList.toggle("is-active", button.dataset.tool === activeTool);
   }
+  colorPicker.classList.toggle("is-hidden", activeTool === "move");
+  document.body.classList.toggle("is-move-tool", mode === "annotate" && activeTool === "move");
 }
 
 function resizeCanvas(canvas: HTMLCanvasElement, width: number, height: number) {
@@ -596,6 +662,10 @@ function clamp(value: number, min: number, max: number) {
 
 function setCrosshairCursor(enabled: boolean) {
   document.body.classList.toggle("is-crosshair", enabled);
+}
+
+function setMovingSelection(enabled: boolean) {
+  document.body.classList.toggle("is-moving-selection", enabled);
 }
 
 function showError(error: unknown) {
