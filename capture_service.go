@@ -513,6 +513,19 @@ func (s *CaptureService) SaveWithDialog(req ExportRequest) (string, error) {
 		return "", err
 	}
 
+	s.mu.Lock()
+	overlay := s.overlay
+	s.mu.Unlock()
+
+	// The overlay sits at screen-saver window level so it stays above
+	// fullscreen apps, which also puts it above the native save panel.
+	// Hide it while the dialog is open so the panel is reachable.
+	if overlay != nil {
+		application.InvokeSync(func() {
+			overlay.Hide()
+		})
+	}
+
 	app := application.Get()
 	path, err := app.Dialog.SaveFile().
 		SetFilename(timestampedFilename()).
@@ -520,13 +533,16 @@ func (s *CaptureService) SaveWithDialog(req ExportRequest) (string, error) {
 		AddFilter("PNG Image", "*.png").
 		PromptForSingleSelection()
 	if err != nil {
+		s.restoreOverlayAfterDialog(overlay)
 		return "", err
 	}
 	if path == "" {
+		s.restoreOverlayAfterDialog(overlay)
 		return "", nil
 	}
 
 	if err := os.WriteFile(path, pngBytes, 0o644); err != nil {
+		s.restoreOverlayAfterDialog(overlay)
 		return "", fmt.Errorf("failed to save screenshot: %w", err)
 	}
 	s.app.Logger.Info("[capture] screenshot saved", "path", path)
@@ -534,6 +550,16 @@ func (s *CaptureService) SaveWithDialog(req ExportRequest) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+func (s *CaptureService) restoreOverlayAfterDialog(overlay *application.WebviewWindow) {
+	if overlay == nil {
+		return
+	}
+	application.InvokeSync(func() {
+		overlay.Show()
+		overlay.Focus()
+	})
 }
 
 func (s *CaptureService) SaveToFile(path string, req ExportRequest) error {
