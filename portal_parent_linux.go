@@ -1,7 +1,8 @@
-//go:build linux && cgo
+//go:build linux && cgo && !gtk3
 
 // Portal parent-window export for xdg-desktop-portal on Wayland.
-// Non-CGO Linux and other OSes use portal_parent_stub.go instead.
+// Non-CGO Linux, other OSes, and the gtk3-tagged backend use
+// portal_parent_stub.go instead (this file needs GTK4 specifically).
 
 package main
 
