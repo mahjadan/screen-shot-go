@@ -24,9 +24,6 @@ tools:
 	@printf 'wails3: %s\n' "$$(wails3 version)"
 
 install: tools
-	@if npm --prefix $(FRONTEND_DIR) help install-scripts >/dev/null 2>&1; then \
-		npm --prefix $(FRONTEND_DIR) install-scripts approve esbuild; \
-	fi
 	@npm --prefix $(FRONTEND_DIR) install
 
 frontend: install

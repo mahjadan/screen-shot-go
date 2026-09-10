@@ -58,6 +58,7 @@ body.is-text-tool #selection-box.is-annotating canvas {
 
 #app {
   position: relative;
+  touch-action: none;
 }
 
 #shot,

@@ -1,5 +1,8 @@
 //go:build linux && cgo
 
+// Portal parent-window export for xdg-desktop-portal on Wayland.
+// Non-CGO Linux and other OSes use portal_parent_stub.go instead.
+
 package main
 
 /*

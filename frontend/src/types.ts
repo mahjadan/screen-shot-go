@@ -19,7 +19,6 @@ export interface CaptureScreen {
 }
 
 export interface CaptureState {
-  fullscreen: boolean;
   imageBase64: string;
   screen: CaptureScreen;
   selection: SelectionBounds;

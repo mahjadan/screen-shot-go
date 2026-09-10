@@ -71,6 +71,8 @@ let selection: SelectionBounds | null = null;
 let annotations: Annotation[] = [];
 let dragState: DragState = null;
 let busy = false;
+let selectionDragMoveCount = 0;
+let selectionDragLastLogAt = 0;
 let activeTextEditor: { element: HTMLInputElement; x: number; y: number } | null = null;
 
 const TEXT_FONT_SIZE = 18;
@@ -92,17 +94,16 @@ void bootstrap();
 
 async function bootstrap() {
   try {
-    captureState = await GetCaptureState();
+    const state = await GetCaptureState();
+    if (!state) {
+      throw new Error("no active capture session");
+    }
+    captureState = state;
     const imageDataUrl = imageDataUrlPrefix + captureState.imageBase64;
     shot.src = imageDataUrl;
 
-    if (captureState.fullscreen) {
-      selection = { ...captureState.selection };
-      enterAnnotationMode();
-    } else {
-      updateSelectionVisuals({ x: 0, y: 0, width: 0, height: 0 });
-      setCrosshairCursor(true);
-    }
+    updateSelectionVisuals({ x: 0, y: 0, width: 0, height: 0 });
+    setCrosshairCursor(true);
 
     bindEvents();
   } catch (error) {
@@ -285,6 +286,9 @@ function onPointerDown(event: PointerEvent) {
   }
 
   if (mode === "selection") {
+    selectionDragMoveCount = 0;
+    selectionDragLastLogAt = 0;
+    overlayLog("selection drag start", { point, t: Math.round(performance.now()) });
     dragState = {
       kind: "selection",
       originX: point.x,
@@ -323,6 +327,16 @@ function onPointerMove(event: PointerEvent) {
   const point = viewportPoint(event.clientX, event.clientY);
 
   if (dragState.kind === "selection") {
+    selectionDragMoveCount += 1;
+    const now = performance.now();
+    if (selectionDragMoveCount === 1 || now - selectionDragLastLogAt > 150) {
+      selectionDragLastLogAt = now;
+      overlayLog("selection drag move", {
+        count: selectionDragMoveCount,
+        t: Math.round(now),
+        point,
+      });
+    }
     dragState.current = normalizeRect(dragState.originX, dragState.originY, point.x, point.y);
     updateSelectionVisuals(dragState.current);
     return;
@@ -382,6 +396,11 @@ function onPointerUp(event: PointerEvent) {
 
   if (dragState.kind === "selection") {
     const finalRect = normalizeRect(dragState.originX, dragState.originY, point.x, point.y);
+    overlayLog("selection drag end", {
+      moveCount: selectionDragMoveCount,
+      t: Math.round(performance.now()),
+      finalRect,
+    });
     dragState = null;
     if (finalRect.width < 5 || finalRect.height < 5) {
       selection = null;
@@ -516,13 +535,11 @@ function updateDimOverlay(
   height: number,
   hasSelection: boolean,
 ) {
+  dimOverlay.classList.remove("is-hidden");
   if (!hasSelection) {
-    dimOverlay.classList.add("is-hidden");
     dimOverlay.style.clipPath = "";
     return;
   }
-
-  dimOverlay.classList.remove("is-hidden");
   const w = viewport.width;
   const h = viewport.height;
   dimOverlay.style.clipPath = `polygon(

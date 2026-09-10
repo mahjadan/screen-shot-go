@@ -1,3 +1,13 @@
 /frontend/node_modules/
 /frontend/dist/*
 !/frontend/dist/index.html
+
+/bin/
+/.task/
+/build/linux/appimage/build/
+
+# This project only targets macOS and Linux. `wails3 update build-assets`
+# unconditionally re-scaffolds these for every platform, so keep them out.
+/build/ios/
+/build/windows/
+/build/linux/desktop
