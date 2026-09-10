@@ -96,13 +96,8 @@ async function bootstrap() {
     const imageDataUrl = imageDataUrlPrefix + captureState.imageBase64;
     shot.src = imageDataUrl;
 
-    if (captureState.fullscreen) {
-      selection = { ...captureState.selection };
-      enterAnnotationMode();
-    } else {
-      updateSelectionVisuals({ x: 0, y: 0, width: 0, height: 0 });
-      setCrosshairCursor(true);
-    }
+    updateSelectionVisuals({ x: 0, y: 0, width: 0, height: 0 });
+    setCrosshairCursor(true);
 
     bindEvents();
   } catch (error) {
@@ -292,6 +287,7 @@ function onPointerDown(event: PointerEvent) {
       current: { x: point.x, y: point.y, width: 0, height: 0 },
     };
     updateSelectionVisuals(dragState.current);
+    app.setPointerCapture(event.pointerId);
     return;
   }
 

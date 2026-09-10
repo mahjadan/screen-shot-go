@@ -50,7 +50,6 @@ type AppConfig struct {
 }
 
 type CaptureSession struct {
-	Fullscreen  bool            `json:"fullscreen"`
 	ImageBase64 string          `json:"imageBase64"`
 	Screen      CaptureScreen   `json:"screen"`
 	Selection   SelectionBounds `json:"selection"`
@@ -116,9 +115,9 @@ func (s *CaptureService) Init() error {
 	return nil
 }
 
-func (s *CaptureService) TriggerCapture(fullscreen bool) {
+func (s *CaptureService) TriggerCapture() {
 	go func() {
-		if err := s.beginCapture(fullscreen); err != nil {
+		if err := s.beginCapture(); err != nil {
 			s.ShowError("Capture Failed", err)
 		}
 	}()
@@ -140,7 +139,7 @@ func (s *CaptureService) PrewarmOverlay() {
 	})
 }
 
-func (s *CaptureService) beginCapture(fullscreen bool) error {
+func (s *CaptureService) beginCapture() error {
 	s.mu.Lock()
 	if s.session != nil {
 		s.mu.Unlock()
@@ -163,7 +162,7 @@ func (s *CaptureService) beginCapture(fullscreen bool) error {
 	)
 
 	logPrefix := "[capture]"
-	s.app.Logger.Info(logPrefix+" starting capture", "fullscreen", fullscreen, "screen", primary.Name)
+	s.app.Logger.Info(logPrefix+" starting capture", "screen", primary.Name)
 
 	if isWaylandSession() && runtime.GOOS == "linux" {
 		img, pngBytes, err = s.captureLinuxWaylandWithAnchor(ctx, primary)
@@ -184,7 +183,6 @@ func (s *CaptureService) beginCapture(fullscreen bool) error {
 	}
 
 	session := &CaptureSession{
-		Fullscreen:  fullscreen,
 		ImageBase64: base64.StdEncoding.EncodeToString(pngBytes),
 		Screen: CaptureScreen{
 			Name:        primary.Name,
@@ -195,14 +193,6 @@ func (s *CaptureService) beginCapture(fullscreen bool) error {
 			ScaleFactor: float64(primary.ScaleFactor),
 		},
 	}
-	if fullscreen {
-		session.Selection = SelectionBounds{
-			X:      0,
-			Y:      0,
-			Width:  float64(screenWidth),
-			Height: float64(screenHeight),
-		}
-	}
 
 	s.mu.Lock()
 	s.screenshotPNG = pngBytes
@@ -212,7 +202,7 @@ func (s *CaptureService) beginCapture(fullscreen bool) error {
 
 	var showErr error
 	application.InvokeSync(func() {
-		showErr = s.showOverlay(primary, fullscreen)
+		showErr = s.showOverlay(primary)
 	})
 	return showErr
 }
@@ -445,7 +435,7 @@ func (s *CaptureService) ensureOverlayWindow(primary *application.Screen) error 
 	return nil
 }
 
-func (s *CaptureService) showOverlay(primary *application.Screen, fullscreen bool) error {
+func (s *CaptureService) showOverlay(primary *application.Screen) error {
 	if err := s.ensureOverlayWindow(primary); err != nil {
 		return err
 	}
@@ -461,7 +451,7 @@ func (s *CaptureService) showOverlay(primary *application.Screen, fullscreen boo
 	overlay.ForceReload()
 	overlay.Show()
 	overlay.Focus()
-	s.app.Logger.Info("[capture] overlay opened", "fullscreen", fullscreen)
+	s.app.Logger.Info("[capture] overlay opened")
 	return nil
 }
 
@@ -881,13 +871,6 @@ func fillCircle(img *image.RGBA, cx, cy, radius int, col color.RGBA) {
 			}
 		}
 	}
-}
-
-func drawRing(img *image.RGBA, cx, cy, radius int, col color.RGBA, thickness int) {
-	for r := max(radius-thickness, 1); r <= radius; r++ {
-		fillCircle(img, cx, cy, r, col)
-	}
-	fillCircle(img, cx, cy, max(radius-thickness-1, 1), color.RGBA{})
 }
 
 func parseHexColor(value string) color.RGBA {
